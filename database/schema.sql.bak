@@ -1,0 +1,261 @@
+-- ============================================================
+-- 短链系统完整数据库结构 v1.0
+-- 支持 MySQL 5.7+ / MariaDB 10.3+
+-- ============================================================
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- ----------------------------
+-- 用户表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `username` varchar(64) NOT NULL COMMENT '用户名',
+  `email` varchar(128) NOT NULL COMMENT '邮箱',
+  `password` varchar(255) NOT NULL COMMENT '密码hash',
+  `nickname` varchar(64) DEFAULT '' COMMENT '昵称',
+  `avatar` varchar(255) DEFAULT '' COMMENT '头像URL',
+  `role` tinyint(1) NOT NULL DEFAULT 2 COMMENT '1=超级管理员 2=普通用户 3=运营员',
+  `status` tinyint(1) NOT NULL DEFAULT 1 COMMENT '0=禁用 1=正常',
+  `invite_code` varchar(32) DEFAULT '' COMMENT '邀请码',
+  `daily_limit` int(11) NOT NULL DEFAULT 100 COMMENT '每日访问限额',
+  `daily_used` int(11) NOT NULL DEFAULT 0 COMMENT '今日已使用次数',
+  `daily_reset_date` date DEFAULT NULL COMMENT '上次重置日期',
+  `no_ad_quota` int(11) NOT NULL DEFAULT 0 COMMENT '免广告额度',
+  `api_token` varchar(64) DEFAULT '' COMMENT 'API Token',
+  `last_login_at` datetime DEFAULT NULL,
+  `last_login_ip` varchar(64) DEFAULT '',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_username` (`username`),
+  UNIQUE KEY `uk_email` (`email`),
+  KEY `idx_role` (`role`),
+  KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
+
+-- ----------------------------
+-- 短链接表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `links` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `short_code` varchar(64) NOT NULL COMMENT '短链后缀（支持中文）',
+  `original_url` text NOT NULL COMMENT '原始长链接',
+  `user_id` int(11) UNSIGNED NOT NULL DEFAULT 0 COMMENT '创建者ID，0=游客',
+  `title` varchar(255) DEFAULT '' COMMENT '链接标题/备注',
+  `group_id` int(11) UNSIGNED NOT NULL DEFAULT 0 COMMENT '分组ID',
+  `domain` varchar(128) NOT NULL DEFAULT '' COMMENT '绑定域名',
+  `status` tinyint(1) NOT NULL DEFAULT 1 COMMENT '0=禁用 1=正常 2=过期',
+  `password` varchar(64) DEFAULT '' COMMENT '访问密码，空=无需密码',
+  `max_visits` int(11) NOT NULL DEFAULT 0 COMMENT '最大访问次数，0=不限',
+  `expire_at` datetime DEFAULT NULL COMMENT '过期时间，NULL=永久',
+  `ad_id` int(11) UNSIGNED NOT NULL DEFAULT 0 COMMENT '绑定广告ID，0=用全局广告',
+  `no_ad` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=免广告白名单',
+  `allow_ips` text DEFAULT NULL COMMENT 'IP白名单，逗号分隔',
+  `pv` bigint(20) UNSIGNED NOT NULL DEFAULT 0 COMMENT '总访问次数PV',
+  `uv` bigint(20) UNSIGNED NOT NULL DEFAULT 0 COMMENT '独立访客UV',
+  `ip_count` bigint(20) UNSIGNED NOT NULL DEFAULT 0 COMMENT '独立IP数',
+  `is_deleted` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=已删除（回收站）',
+  `deleted_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_short_code` (`short_code`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_status` (`status`),
+  KEY `idx_group_id` (`group_id`),
+  KEY `idx_expire_at` (`expire_at`),
+  KEY `idx_is_deleted` (`is_deleted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='短链接表';
+
+-- ----------------------------
+-- 访问日志表（分区优化）
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `access_logs` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `link_id` bigint(20) UNSIGNED NOT NULL COMMENT '短链ID',
+  `short_code` varchar(64) NOT NULL COMMENT '短链后缀',
+  `ip` varchar(64) NOT NULL DEFAULT '' COMMENT '访问IP',
+  `ip_location` varchar(128) DEFAULT '' COMMENT 'IP归属地',
+  `province` varchar(32) DEFAULT '' COMMENT '省份',
+  `city` varchar(32) DEFAULT '' COMMENT '城市',
+  `country` varchar(32) DEFAULT '' COMMENT '国家',
+  `device_type` varchar(16) DEFAULT '' COMMENT 'mobile/desktop/tablet',
+  `os` varchar(32) DEFAULT '' COMMENT '操作系统',
+  `browser` varchar(64) DEFAULT '' COMMENT '浏览器',
+  `referer` varchar(512) DEFAULT '' COMMENT '来源',
+  `user_agent` varchar(512) DEFAULT '' COMMENT 'UA',
+  `is_bot` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=机器人/爬虫',
+  `stay_seconds` int(11) NOT NULL DEFAULT 0 COMMENT '停留秒数',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_link_id` (`link_id`),
+  KEY `idx_short_code` (`short_code`),
+  KEY `idx_ip` (`ip`),
+  KEY `idx_created_at` (`created_at`),
+  KEY `idx_is_bot` (`is_bot`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='访问日志表';
+
+-- ----------------------------
+-- 每日统计汇总表（加速查询）
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `link_stats_daily` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `link_id` bigint(20) UNSIGNED NOT NULL,
+  `stat_date` date NOT NULL COMMENT '统计日期',
+  `pv` bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+  `uv` bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+  `ip_count` bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+  `bot_count` bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_link_date` (`link_id`, `stat_date`),
+  KEY `idx_stat_date` (`stat_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每日统计汇总';
+
+-- ----------------------------
+-- 广告表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `ads` (
+  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name` varchar(64) NOT NULL COMMENT '广告名称',
+  `type` varchar(16) NOT NULL DEFAULT 'countdown' COMMENT 'countdown/banner/popup/landing',
+  `content` text NOT NULL COMMENT '广告内容（HTML/图文/代码）',
+  `image_url` varchar(512) DEFAULT '' COMMENT '广告图片',
+  `link_url` varchar(512) DEFAULT '' COMMENT '广告跳转链接',
+  `countdown` int(11) NOT NULL DEFAULT 5 COMMENT '倒计时秒数',
+  `skip_mode` varchar(16) NOT NULL DEFAULT 'auto' COMMENT 'auto=自动跳转 manual=手动点击',
+  `btn_text` varchar(32) DEFAULT '跳过广告' COMMENT '跳过按钮文字',
+  `btn_style` varchar(512) DEFAULT '' COMMENT '按钮样式JSON',
+  `is_global` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=全局广告',
+  `status` tinyint(1) NOT NULL DEFAULT 1,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_type` (`type`),
+  KEY `idx_is_global` (`is_global`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='广告表';
+
+-- ----------------------------
+-- 链接分组表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `link_groups` (
+  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) UNSIGNED NOT NULL DEFAULT 0,
+  `name` varchar(64) NOT NULL COMMENT '分组名',
+  `color` varchar(16) DEFAULT '#409EFF' COMMENT '标签颜色',
+  `sort` int(11) NOT NULL DEFAULT 0,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='链接分组';
+
+-- ----------------------------
+-- 系统配置表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `settings` (
+  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `key` varchar(64) NOT NULL COMMENT '配置键',
+  `value` text COMMENT '配置值',
+  `type` varchar(16) DEFAULT 'string' COMMENT 'string/json/bool/int',
+  `label` varchar(128) DEFAULT '' COMMENT '配置说明',
+  `group` varchar(32) DEFAULT 'general' COMMENT '配置分组',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_key` (`key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统配置';
+
+-- ----------------------------
+-- 邀请码表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `invite_codes` (
+  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `code` varchar(32) NOT NULL,
+  `created_by` int(11) UNSIGNED NOT NULL DEFAULT 1,
+  `used_by` int(11) UNSIGNED DEFAULT NULL,
+  `used_at` datetime DEFAULT NULL,
+  `max_uses` int(11) NOT NULL DEFAULT 1,
+  `use_count` int(11) NOT NULL DEFAULT 0,
+  `expire_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='邀请码表';
+
+-- ----------------------------
+-- 操作日志表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `operation_logs` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) UNSIGNED NOT NULL DEFAULT 0,
+  `action` varchar(64) NOT NULL COMMENT '操作类型',
+  `target_type` varchar(32) DEFAULT '' COMMENT '操作对象类型',
+  `target_id` varchar(64) DEFAULT '' COMMENT '操作对象ID',
+  `description` varchar(512) DEFAULT '' COMMENT '操作描述',
+  `ip` varchar(64) DEFAULT '',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_action` (`action`),
+  KEY `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='操作日志';
+
+-- ----------------------------
+-- IP黑名单表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `ip_blacklist` (
+  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `ip_range` varchar(64) NOT NULL COMMENT 'IP或CIDR',
+  `reason` varchar(255) DEFAULT '' COMMENT '封禁原因',
+  `expire_at` datetime DEFAULT NULL COMMENT 'NULL=永久',
+  `created_by` int(11) UNSIGNED NOT NULL DEFAULT 1,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_ip_range` (`ip_range`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='IP黑名单';
+
+-- ----------------------------
+-- 违规域名表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `domain_blacklist` (
+  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `domain` varchar(255) NOT NULL,
+  `reason` varchar(64) DEFAULT '' COMMENT '赌博/诈骗/色情等',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_domain` (`domain`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='违规域名黑名单';
+
+-- ----------------------------
+-- 初始数据
+-- ----------------------------
+INSERT INTO `users` (`username`, `email`, `password`, `nickname`, `role`, `status`) VALUES
+('admin', 'admin@example.com', '$2y$12$YourHashHere', '超级管理员', 1, 1);
+
+INSERT INTO `settings` (`key`, `value`, `type`, `label`, `group`) VALUES
+('site_name', '极链 · 短链接系统', 'string', '网站名称', 'general'),
+('site_logo', '', 'string', '网站LOGO', 'general'),
+('site_icp', '', 'string', '备案号', 'general'),
+('site_seo_keywords', '短链接,短网址,链接缩短', 'string', 'SEO关键词', 'general'),
+('site_seo_desc', '专业短链接生成平台，快速生成短网址，支持访问统计', 'string', 'SEO描述', 'general'),
+('default_domain', '', 'string', '默认短链域名', 'general'),
+('register_mode', 'open', 'string', '注册模式: open/invite/closed', 'auth'),
+('guest_create', '1', 'bool', '游客可免注册生成', 'auth'),
+('api_open', '1', 'bool', '开放API接口', 'general'),
+('query_public', '1', 'bool', '公开查询开关', 'general'),
+('ip_rate_limit', '10', 'int', '同IP每分钟生成限制', 'security'),
+('global_ad_id', '0', 'int', '全局广告ID', 'ad'),
+('cache_ttl', '300', 'int', '短链缓存秒数', 'performance'),
+('short_code_length', '6', 'int', '随机短码长度', 'general'),
+('default_expire_days', '0', 'int', '默认有效天数（0=永久）', 'general'),
+('link_public_stat', '1', 'bool', '公开统计数据', 'general');
+
+INSERT INTO `ads` (`name`, `type`, `content`, `countdown`, `skip_mode`, `btn_text`, `is_global`, `status`) VALUES
+('默认全局广告', 'countdown', '<div class="ad-default"><p>广告位招租，请在后台配置广告内容</p></div>', 5, 'auto', '跳过广告（{countdown}秒）', 1, 1);
+
+INSERT INTO `link_groups` (`user_id`, `name`, `color`) VALUES
+(0, '默认分组', '#409EFF'),
+(0, '推广链接', '#67C23A'),
+(0, '测试链接', '#E6A23C');
+
+SET FOREIGN_KEY_CHECKS = 1;
